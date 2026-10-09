@@ -1,5 +1,8 @@
-# Downloaded sites, job state and generated archives
-storage/jobs/
+# Downloaded sites, job state and generated archives.
+# The blank index.html files are kept: they stop the folders being browsable
+# on hosts where .htaccess directives are refused.
+storage/jobs/*
+!storage/jobs/index.html
 
 # Editor and OS noise
 .vscode/

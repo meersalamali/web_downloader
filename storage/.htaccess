@@ -1,17 +1,22 @@
-# This folder holds files downloaded from other websites. Treat it as untrusted.
+# This folder holds files downloaded from other websites, so nothing in it
+# should ever be executed.
 #
-# SetHandler/ForceType are used instead of "php_flag engine off" because they
-# work whether or not mod_php is loaded, and cannot cause a 500 error.
-
-Options -Indexes -ExecCGI
+# Deliberately minimal: shared hosts commonly refuse "Options" and "php_flag"
+# in .htaccess, and a single refused directive makes Apache return 500 for
+# every request on the whole site. Only widely permitted directives are used.
+#
+# If your host still rejects this file, delete it. The app keeps working; you
+# only lose this extra layer, and job folder names stay hard to guess.
 
 <FilesMatch "\.(php|phps|phtml|php3|php4|php5|php7|php8|pht|inc|cgi|pl|py|rb|asp|aspx|jsp|jspx|shtml|sh|bat|exe)$">
     SetHandler none
     ForceType text/plain
-    RemoveHandler .php .phps .phtml .php3 .php4 .php5 .php7 .php8 .cgi .pl .py .rb .asp .aspx .jsp .shtml
 </FilesMatch>
 
-# Job bookkeeping is private; only the rewritten site/ tree is meant to be browsed.
-<FilesMatch "^(job|queue|res|pack)\.json$|\.jsonl$|\.dat$|^lock$">
-    Require all denied
-</FilesMatch>
+# Job bookkeeping is private: it records the URLs crawled and any cookie you
+# pasted in. Only the rewritten site/ tree is meant to be browsed.
+<IfModule mod_authz_core.c>
+    <FilesMatch "^(job|queue|res|pack)\.json$|\.jsonl$|\.dat$|^lock$">
+        Require all denied
+    </FilesMatch>
+</IfModule>

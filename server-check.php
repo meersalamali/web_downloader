@@ -13,6 +13,9 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: no-referrer');
+
 $e = static fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 
 /** @return array{0:string,1:string,2:string} [state, label, detail] */
@@ -100,6 +103,18 @@ if (!$writable) {
 }
 $checks[] = ['Storage writable', $writable ? 'ok' : 'bad',
     $writable ? 'yes' : 'no', $writable ? $storage : 'Cannot write to ' . $storage . ' - set it to 755 or 777.'];
+
+/* ---------------------------------------------------------------- .htaccess */
+
+$htaccess = __DIR__ . '/storage/.htaccess';
+$checks[] = ['storage/.htaccess', is_file($htaccess) ? 'ok' : 'warn',
+    is_file($htaccess) ? 'present' : 'absent',
+    is_file($htaccess)
+        ? 'Stops downloaded files being executed. If your host ever answers "Something '
+          . 'Went Wrong" or HTTP 500 on every page, this file is the first thing to delete - '
+          . 'some hosts refuse .htaccess directives and then fail every request.'
+        : 'Optional. Without it, job folder names (which are hard to guess) are the only '
+          . 'thing keeping stored files private.'];
 
 /* ---------------------------------------------------------------- live outbound test */
 

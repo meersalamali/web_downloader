@@ -87,6 +87,12 @@ final class Job
         Util::ensureDir($job->dir('raw'));
         Util::ensureDir($job->dir('site'));
         Util::ensureDir($job->dir('out'));
+
+        // Keep the job's own folders from being browsable. site/ is left alone:
+        // it holds the copied website and is meant to be opened.
+        Util::denyListing($job->dir());
+        Util::denyListing($job->dir('raw'));
+        Util::denyListing($job->dir('out'));
         $job->queueLoaded = true;
         $job->resLoaded = true;
         $job->save();

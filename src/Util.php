@@ -18,6 +18,27 @@ final class Util
         }
     }
 
+    /**
+     * Drop a blank index.html into a folder so the web server serves that
+     * instead of generating a browsable file listing.
+     *
+     * This replaces "Options -Indexes": shared hosts often refuse the Options
+     * directive in .htaccess and then return 500 for every request, whereas an
+     * index file works everywhere with no configuration at all.
+     */
+    public static function denyListing(string $dir): void
+    {
+        $file = rtrim(self::slashes($dir), '/') . '/index.html';
+        if (is_file($file)) {
+            return;
+        }
+        @file_put_contents(
+            $file,
+            "<!DOCTYPE html>\n<html><head><meta name=\"robots\" content=\"noindex\">"
+            . "<title>Not available</title></head><body></body></html>\n"
+        );
+    }
+
     public static function bytes(int $n): string
     {
         $units = ['B', 'KB', 'MB', 'GB', 'TB'];

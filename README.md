@@ -99,6 +99,29 @@ check page fails here, use a different host or run it locally.
 traffic. Keep the delay and page limits modest, or run it locally where only your own
 bandwidth is involved.
 
+### Keeping storage private
+
+`storage/` holds bytes fetched from other sites, so nothing there should be executed or
+browsed. Two independent layers handle it, deliberately:
+
+1. **Blank `index.html` files** in `storage/`, `storage/jobs/` and each job folder.
+   These stop directory listings on every server, with no configuration. They exist
+   because `Options -Indexes` is exactly the kind of directive shared hosts refuse —
+   and a refused directive breaks the whole site rather than just that rule.
+2. **`storage/.htaccess`**, which stops scripts executing and blocks the job
+   bookkeeping files. This one is a bonus, not a requirement.
+
+If a host rejects `.htaccess` entirely, delete `storage/.htaccess`. Listings stay
+blocked by layer 1, and job folders are named with a timestamp plus six random
+characters, so they are not realistically guessable.
+
+One thing to be aware of: a **Cookie header** you paste into the advanced options is
+saved in that job's `job.json` so it can be reused across ticks. On shared hosting,
+delete the job when you are finished with it.
+
+Note that `storage/jobs/<id>/site/` is *meant* to be browsable — that is the copied
+website, and the **Open the copy** button links straight into it.
+
 ---
 
 ## Using it
@@ -263,6 +286,12 @@ verification fails on sites that are perfectly fine. Turn it on if you have
 ---
 
 ## Troubleshooting
+
+**"Something Went Wrong" / HTTP 500 on every page, blamed on `.htaccess`** — a host has
+refused an `.htaccess` directive, and Apache then fails *every* request on the site.
+`Options` and `php_flag` are the usual ones; InfinityFree rejects `Options`. The shipped
+files avoid both, so update to the current version. If it still happens, delete
+`storage/.htaccess` — the app works fine without it (see *Keeping storage private*).
 
 **"Call to undefined function curl_multi_exec()"** — your host disabled the parallel
 cURL functions. Handled automatically now; make sure you are on the current version.

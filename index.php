@@ -3,6 +3,11 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+// Sent from PHP rather than .htaccess: shared hosts often reject directives in
+// .htaccess outright, and a refused one makes Apache 500 on every request.
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: no-referrer');
+
 $def  = (array) sg_config('defaults');
 $hard = (array) sg_config('hard_limits');
 $app  = (string) sg_config('app_name');

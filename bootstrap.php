@@ -38,3 +38,5 @@ function sg_storage(string $sub = ''): string
 }
 
 Util::ensureDir(sg_storage('jobs'));
+Util::denyListing(sg_storage());
+Util::denyListing(sg_storage('jobs'));
