@@ -91,6 +91,12 @@ final class Crawler
         $host = (string) $job->meta['host'];
         $job->log('info', 'Starting on ' . $root);
 
+        $modeNote = Http::modeNote();
+        if ($modeNote !== '') {
+            $job->log('warn', $modeNote);
+            $job->note($modeNote);
+        }
+
         // Fetch robots.txt first so we honour it from the very first request.
         if ($job->opt('respect_robots', true)) {
             $robotsUrl = preg_replace('#^(https?://[^/]+).*$#', '$1/robots.txt', $root);
@@ -221,6 +227,12 @@ final class Crawler
         $this->buildUsedPaths();
 
         $concurrency = (int) Util::clamp((int) $job->opt('concurrency', 5), 1, 12);
+        // Without parallel cURL a batch runs one request after another, and the
+        // tick deadline is only checked between batches. Keep batches small so a
+        // few slow responses cannot overrun a short execution limit.
+        if (Http::mode() !== 'multi') {
+            $concurrency = min($concurrency, 2);
+        }
         $delayMs = (int) Util::clamp((int) $job->opt('delay_ms', 150), 0, 10000);
         $robotsDelay = (int) round($this->robots->crawlDelay() * 1000);
         $delayMs = max($delayMs, $robotsDelay);

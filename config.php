@@ -13,7 +13,16 @@ return [
     'storage_dir' => __DIR__ . '/storage',
 
     // Seconds of work per AJAX "tick". Keep below your PHP max_execution_time.
+    // Lower this to 3.0 on free shared hosting, which often caps execution at 10s.
     'tick_seconds' => 6.0,
+
+    // How outgoing requests are made. '' = detect automatically, which is right
+    // almost always. Shared hosts frequently disable the curl_multi_* functions,
+    // and the detection handles that on its own. Pin it only to debug:
+    //   'multi'  parallel cURL (fastest)
+    //   'single' one cURL request at a time
+    //   'stream' no cURL at all, uses PHP streams (needs allow_url_fopen)
+    'force_http_mode' => '',
 
     // Hard ceilings a user cannot exceed from the UI (safety rails).
     'hard_limits' => [

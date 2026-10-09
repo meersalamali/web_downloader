@@ -41,7 +41,63 @@ final class Http
     }
 
     /**
-     * Fetch many URLs in parallel. $onDone is called once per finished request.
+     * What this server can actually do. Shared hosts often disable the
+     * curl_multi_* family (or all of cURL) through disable_functions, so the
+     * capability is detected once and the fetcher degrades instead of crashing.
+     *
+     * @return string 'multi' | 'single' | 'stream' | 'none'
+     */
+    public static function mode(): string
+    {
+        static $mode = null;
+        if ($mode !== null) {
+            return $mode;
+        }
+
+        // Escape hatch: config.php can pin the mode if detection guesses wrong.
+        $forced = (string) sg_config('force_http_mode', '');
+        if (in_array($forced, ['multi', 'single', 'stream'], true)) {
+            $mode = $forced;
+            return $mode;
+        }
+
+        $single = function_exists('curl_init') && function_exists('curl_exec')
+               && function_exists('curl_setopt_array') && function_exists('curl_getinfo');
+
+        $multi = $single
+              && function_exists('curl_multi_init') && function_exists('curl_multi_exec')
+              && function_exists('curl_multi_add_handle') && function_exists('curl_multi_select')
+              && function_exists('curl_multi_info_read') && function_exists('curl_multi_remove_handle')
+              && function_exists('curl_multi_close');
+
+        if ($multi) {
+            $mode = 'multi';
+        } elseif ($single) {
+            $mode = 'single';
+        } elseif (filter_var(ini_get('allow_url_fopen'), FILTER_VALIDATE_BOOLEAN)) {
+            $mode = 'stream';
+        } else {
+            $mode = 'none';
+        }
+        return $mode;
+    }
+
+    /** Human readable note for the activity log. */
+    public static function modeNote(): string
+    {
+        return match (self::mode()) {
+            'multi'  => '',
+            'single' => 'This server has the parallel cURL functions disabled, so files are '
+                      . 'fetched one at a time. It still works, just slower.',
+            'stream' => 'cURL is not available on this server, so downloads use PHP streams. '
+                      . 'Slower, and HTTP authentication is not supported.',
+            default  => '',
+        };
+    }
+
+    /**
+     * Fetch many URLs, in parallel where the server allows it.
+     * $onDone is called once per finished request.
      */
     public function getMany(array $urls, callable $onDone, bool $headOnly = false): void
     {
@@ -50,6 +106,43 @@ final class Http
             return;
         }
 
+        switch (self::mode()) {
+            case 'multi':
+                $this->getManyParallel($urls, $onDone, $headOnly);
+                return;
+
+            case 'single':
+                foreach ($urls as $u) {
+                    $onDone($this->getOneCurl($u, $headOnly));
+                }
+                return;
+
+            case 'stream':
+                foreach ($urls as $u) {
+                    $onDone($this->getOneStream($u, $headOnly));
+                }
+                return;
+
+            default:
+                throw new RuntimeException(
+                    'This server cannot make outgoing web requests: cURL is disabled and '
+                    . 'allow_url_fopen is off. Ask your host to enable the cURL extension, '
+                    . 'or run the tool somewhere you control (for example XAMPP on your own PC).'
+                );
+        }
+    }
+
+    /** One handle at a time, for hosts with curl_multi_* disabled. */
+    private function getOneCurl(string $url, bool $headOnly): array
+    {
+        [$ch, $state] = $this->prepare($url, $headOnly);
+        curl_exec($ch);
+        $errno = function_exists('curl_errno') ? (int) curl_errno($ch) : 0;
+        return $this->result($ch, $url, $state, $errno);
+    }
+
+    private function getManyParallel(array $urls, callable $onDone, bool $headOnly): void
+    {
         $mh = curl_multi_init();
         $slots = [];   // spl_object_id => ['ch'=>handle,'url'=>string,'state'=>array]
 
@@ -87,6 +180,123 @@ final class Http
             // handle freed on scope exit
         }
         curl_multi_close($mh);
+    }
+
+    /**
+     * Last resort: PHP stream wrappers, for hosts with cURL fully disabled.
+     * ignore_errors keeps the body of a 404 so the crawler can log it properly.
+     */
+    private function getOneStream(string $url, bool $headOnly): array
+    {
+        $start = microtime(true);
+        $max = (int) $this->opt['max_bytes'];
+
+        $headers = [
+            'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language: en-US,en;q=0.9',
+        ];
+        if (($this->opt['cookie'] ?? '') !== '') {
+            $headers[] = 'Cookie: ' . $this->opt['cookie'];
+        }
+        if (($this->opt['auth_user'] ?? '') !== '') {
+            $headers[] = 'Authorization: Basic '
+                . base64_encode($this->opt['auth_user'] . ':' . $this->opt['auth_pass']);
+        }
+
+        $ctx = stream_context_create([
+            'http' => [
+                'method'           => $headOnly ? 'HEAD' : 'GET',
+                'user_agent'       => (string) $this->opt['user_agent'],
+                'header'           => implode("\r\n", $headers),
+                'follow_location'  => 1,
+                'max_redirects'    => 7,
+                'timeout'          => (float) $this->opt['timeout'],
+                'ignore_errors'    => true,
+                'protocol_version' => 1.1,
+            ],
+            'ssl' => [
+                'verify_peer'       => (bool) $this->opt['verify_ssl'],
+                'verify_peer_name'  => (bool) $this->opt['verify_ssl'],
+                'SNI_enabled'       => true,
+            ],
+        ]);
+
+        $fh = @fopen($url, 'rb', false, $ctx);
+        if (!$fh) {
+            $e = error_get_last();
+            return self::fail($url, trim((string) ($e['message'] ?? 'connection failed')));
+        }
+
+        $meta = stream_get_meta_data($fh);
+        $body = '';
+        $tooBig = false;
+        if (!$headOnly) {
+            while (!feof($fh)) {
+                $chunk = fread($fh, 131072);
+                if ($chunk === false || $chunk === '') {
+                    break;
+                }
+                $body .= $chunk;
+                if (strlen($body) > $max) {
+                    $tooBig = true;
+                    $body = '';
+                    break;
+                }
+            }
+        }
+        fclose($fh);
+
+        // wrapper_data holds every hop; the last status line is the real one.
+        $status = 0;
+        $parsed = [];
+        $location = '';
+        foreach ((array) ($meta['wrapper_data'] ?? []) as $line) {
+            $line = (string) $line;
+            if (stripos($line, 'HTTP/') === 0) {
+                if (preg_match('#\s(\d{3})\s#', $line . ' ', $m)) {
+                    $status = (int) $m[1];
+                }
+                $parsed = [];
+                continue;
+            }
+            $pos = strpos($line, ':');
+            if ($pos !== false) {
+                $name = strtolower(substr($line, 0, $pos));
+                $parsed[$name] = trim(substr($line, $pos + 1));
+                if ($name === 'location') {
+                    $location = $parsed[$name];
+                }
+            }
+        }
+
+        $final = $url;
+        if ($location !== '') {
+            $resolved = Url::resolve($url, $location);
+            if ($resolved !== null && $resolved !== '') {
+                $final = $resolved;
+            }
+        }
+
+        $error = '';
+        if ($tooBig) {
+            $error = 'skipped: larger than the per-file limit';
+        } elseif ($status === 0) {
+            $error = 'no response';
+        } elseif ($status >= 400) {
+            $error = 'HTTP ' . $status;
+        }
+
+        return [
+            'url'       => $url,
+            'final_url' => Url::normalize($final) ?: $final,
+            'status'    => $status,
+            'ctype'     => (string) ($parsed['content-type'] ?? ''),
+            'body'      => $body,
+            'size'      => strlen($body),
+            'error'     => $error,
+            'headers'   => $parsed,
+            'ms'        => (int) round((microtime(true) - $start) * 1000),
+        ];
     }
 
     /**
@@ -176,8 +386,10 @@ final class Http
             $error = 'skipped: larger than the per-file limit';
             $body = '';
         } elseif ($curlResult !== CURLE_OK) {
-            $error = curl_strerror($curlResult) ?: ('curl error ' . $curlResult);
-            $e = curl_error($ch);
+            $error = function_exists('curl_strerror')
+                ? (curl_strerror($curlResult) ?: 'curl error ' . $curlResult)
+                : 'curl error ' . $curlResult;
+            $e = function_exists('curl_error') ? (string) curl_error($ch) : '';
             if ($e !== '') {
                 $error = $e;
             }
