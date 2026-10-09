@@ -1,0 +1,11 @@
+# Downloaded sites, job state and generated archives
+storage/jobs/
+
+# Editor and OS noise
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.tmp
+*.log
+tmp_*.json

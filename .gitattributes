@@ -1,0 +1,15 @@
+# Normalise line endings: LF in the repository
+* text=auto
+
+# Treat these as binary so they are never line-ending converted
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.zip   binary
+*.pdf   binary
